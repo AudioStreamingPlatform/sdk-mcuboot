@@ -947,6 +947,11 @@ boot_validated_swap_type(struct boot_loader_state *state,
                 swap_type = BOOT_SWAP_TYPE_NONE;
             }
         }
+
+        int rc = boot_clear_magic(secondary_fa);
+        if (rc != 0) {
+            return BOOT_SWAP_TYPE_FAIL;
+        }
 #endif /* CONFIG_SOC_NRF5340_CPUAPP */
     }
 
