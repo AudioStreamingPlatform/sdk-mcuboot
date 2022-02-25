@@ -565,6 +565,15 @@ out:
         rc = boot_handle_enc_fw();
     }
 #endif //#ifdef MCUBOOT_ENC_IMAGES
+
+#if defined(CONFIG_SOC_NRF5340_CPUAPP) && defined(PM_CPUNET_B0N_ADDRESS)
+    if (rc == 0) {
+        rc = boot_set_pending_multi(img_num, 1);
+        if (rc) {
+            BOOT_LOG_ERR("Error %d while setting image to pending", rc);
+        }
+    }
+#endif
 }
 
 /*

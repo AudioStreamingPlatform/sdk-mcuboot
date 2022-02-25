@@ -339,6 +339,25 @@ boot_write_magic(const struct flash_area *fap)
     return 0;
 }
 
+int
+boot_clear_magic(const struct flash_area *fap)
+{
+    uint32_t off;
+    int rc;
+
+    off = boot_magic_off(fap);
+
+    BOOT_LOG_DBG("clearing magic; fa_id=%d off=0x%lx (0x%lx)",
+                 fap->fa_id, (unsigned long)off,
+                 (unsigned long)(fap->fa_off + off));
+    rc = flash_area_write(fap, off, NULL, BOOT_MAGIC_SZ);
+    if (rc != 0) {
+        return BOOT_EFLASH;
+    }
+
+    return 0;
+}
+
 /**
  * Write trailer data; status bytes, swap_size, etc
  *
