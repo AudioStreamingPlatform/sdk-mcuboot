@@ -414,6 +414,13 @@ bs_upload(char *buf, int len)
                 }
             }
 #endif
+#if defined(CONFIG_SOC_NRF5340_CPUAPP) && defined(PM_CPUNET_B0N_ADDRESS)
+            rc = boot_set_pending_multi(img_num, 1);
+            if (rc) {
+                BOOT_LOG_ERR("Error %d while setting image to pending", rc);
+                goto out;
+            }
+#endif
             rc = BOOT_HOOK_CALL(boot_serial_uploaded_hook, 0, img_num, fap,
                                 img_size);
             if (rc) {
