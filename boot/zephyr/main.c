@@ -250,8 +250,6 @@ static void do_boot(struct boot_rsp *rsp)
     __set_MSPLIM(0);
 #endif
 
-#else
-    irq_lock();
 #endif /* CONFIG_MCUBOOT_CLEANUP_ARM_CORE */
 
 #ifdef CONFIG_BOOT_INTR_VEC_RELOC
@@ -270,7 +268,6 @@ static void do_boot(struct boot_rsp *rsp)
 #endif
 #endif /* CONFIG_BOOT_INTR_VEC_RELOC */
 
-    __set_MSP(vt->msp);
 #if CONFIG_MCUBOOT_CLEANUP_ARM_CORE
     __set_CONTROL(0x00); /* application will configures core on its own */
     __ISB();
