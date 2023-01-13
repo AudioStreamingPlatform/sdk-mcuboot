@@ -67,6 +67,25 @@ config SINGLE_APPLICATION_SLOT
 	  uploading a new application overwrites the one that previously
 	  occupied the area.
 
+config MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+	bool "mcumgr:image_upload assumes n=1+image*2+slot"
+	default n
+	help
+	  This option enables a simple mapping between
+	  image/slot listed by "mcumgr:image list" and
+	  the n argument used by "mcumgr:image upload"
+	  If unsure, leave at the default value.
+
+config MCUBOOT_SERIAL_MCUMGR_VERSION_DECORATE
+	bool "mcumgr:image_list appends info to version"
+	default n
+	help
+	  This option helps understand details about
+	  the different image/slots listed.
+	  Decided to append it to version property to
+	  make it visible with standard mcumgr clients.
+	  If unsure, leave at the default value.
+
 choice BOOT_SIGNATURE_TYPE
 	prompt "Signature type"
 	default BOOT_SIGNATURE_TYPE_RSA

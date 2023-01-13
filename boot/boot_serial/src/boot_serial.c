@@ -82,7 +82,11 @@ BOOT_LOG_MODULE_DECLARE(mcuboot);
 #define MCUBOOT_SERIAL_MAX_RECEIVE_SIZE 512
 #endif
 
+#ifndef CONFIG_MCUBOOT_SERIAL_MCUMGR_VERSION_DECORATE
 #define BOOT_SERIAL_OUT_MAX     (128 * BOOT_IMAGE_NUMBER)
+#else
+#define BOOT_SERIAL_OUT_MAX     (512 * BOOT_IMAGE_NUMBER)
+#endif
 
 #ifdef __ZEPHYR__
 /* base64 lib encodes data to null-terminated string */
@@ -205,6 +209,67 @@ bs_list_img_ver(char *dst, int maxlen, struct image_version *ver)
 }
 #endif /* !MCUBOOT_USE_SNPRINTF */
 
+#ifdef CONFIG_MCUBOOT_SERIAL_MCUMGR_VERSION_DECORATE
+static int flash_upload_id_from_image_slot(uint32_t image_index, uint32_t slot)
+{
+#ifdef CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+    return 1 + image_index * 2 + slot;
+#elif defined(MCUBOOT_SERIAL_DIRECT_IMAGE_UPLOAD)
+    uint8_t i;
+    for (i = 1; i <= BOOT_IMAGE_NUMBER*2; i++) {
+        int r = flash_area_id_from_direct_image(i);
+        if (r == area_id) {
+            return i;
+        }
+    }
+    return -1;
+#else
+    (void)slot;
+    return img_num, 0;
+#endif
+}
+
+const char* flash_slot_name_from_image_slot(uint32_t image_index, uint32_t slot)
+{
+#ifdef CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+    /* NRF mapping */
+    switch (flash_upload_id_from_image_slot(image_index, slot))
+    {
+        case 1: return "app";
+        case 2: return "net";
+        case 3: return "boot0";
+        case 4: return "boot1";
+    }
+#endif
+    return "unknown";
+}
+#endif /* #ifdef CONFIG_MCUBOOT_SERIAL_MCUMGR_VERSION_DECORATE */
+
+static int flash_area_id_from_upload_id(uint32_t upload_id)
+{
+#ifdef CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+    if (upload_id >= 1) {
+        uint32_t image_index = (upload_id - 1) / 2;
+        uint32_t slot = (upload_id - 1) % 2;
+        return flash_area_id_from_multi_image_slot(image_index, slot);
+    }
+    return -1;
+#elif defined(MCUBOOT_SERIAL_DIRECT_IMAGE_UPLOAD)
+    return flash_area_id_from_multi_image_slot(upload_id, 0);
+#else
+    return flash_area_id_from_direct_image(upload_id);
+#endif
+}
+
+static bool flash_area_is_active_bootloader(const struct flash_area *fap)
+{
+    uint32_t mcuboot_xip_addr = (uint32_t)(&flash_area_is_active_bootloader);
+    if (mcuboot_xip_addr >= fap->fa_off && mcuboot_xip_addr < fap->fa_off + fap->fa_size) {
+        return true;
+    }
+    return false;
+}
+
 /*
  * List images.
  */
@@ -212,7 +277,8 @@ static void
 bs_list(char *buf, int len)
 {
     struct image_header hdr;
-    uint8_t tmpbuf[64];
+    uint8_t tmpbuf[128];
+    uint8_t hash_sha256[32];
     uint32_t slot, area_id;
     const struct flash_area *fap;
     uint8_t image_index;
@@ -223,6 +289,7 @@ bs_list(char *buf, int len)
     image_index = 0;
     IMAGES_ITER(image_index) {
         for (slot = 0; slot < 2; slot++) {
+            const char* errorInfo = NULL;
             area_id = flash_area_id_from_multi_image_slot(image_index, slot);
             if (flash_area_open(area_id, &fap)) {
                 continue;
@@ -256,15 +323,18 @@ bs_list(char *buf, int len)
                     }
 #endif
                     FIH_CALL(bootutil_img_validate, fih_rc, NULL, 0, &hdr, fap, tmpbuf, sizeof(tmpbuf),
-                                    NULL, 0, NULL);
+                                    NULL, 0, &hash_sha256[0]);
+                    if (fih_not_eq(fih_rc, FIH_SUCCESS)) {
+                        errorInfo = "imageInvalid";
+                    }
                 }
+            } else if (hdr.ih_magic == 0xFFFFFFFF) {
+                errorInfo = "headerErased";
+            } else {
+                errorInfo = "headerInvalid";
             }
 
             flash_area_close(fap);
-
-            if (fih_not_eq(fih_rc, FIH_SUCCESS)) {
-                continue;
-            }
 
             zcbor_map_start_encode(cbor_state, 20);
 
@@ -275,9 +345,30 @@ bs_list(char *buf, int len)
 
             zcbor_tstr_put_lit_cast(cbor_state, "slot");
             zcbor_uint32_put(cbor_state, slot);
-            zcbor_tstr_put_lit_cast(cbor_state, "version");
+            if (!errorInfo) {
+                if (flash_area_is_active_bootloader(fap)) {
+                    zcbor_tstr_put_lit_cast(cbor_state, "active");
+                    zcbor_bool_put(cbor_state, true);
+                }
+                zcbor_tstr_put_lit_cast(cbor_state, "bootable");
+                zcbor_bool_put(cbor_state, true);
 
-            bs_list_img_ver((char *)tmpbuf, sizeof(tmpbuf), &hdr.ih_ver);
+                zcbor_tstr_put_lit_cast(cbor_state, "hash"); /* hashAreaSize=ih_hdr_size+ih_img_size) */
+                zcbor_tstr_encode_ptr(cbor_state, hash_sha256, sizeof(hash_sha256));
+
+                bs_list_img_ver((char *)tmpbuf, sizeof(tmpbuf), &hdr.ih_ver);
+            } else {
+                strncpy(tmpbuf, errorInfo, sizeof(tmpbuf));
+            }
+            zcbor_tstr_put_lit_cast(cbor_state, "version");
+#ifdef CONFIG_MCUBOOT_SERIAL_MCUMGR_VERSION_DECORATE
+            // append details for diagnostic
+            snprintf(tmpbuf+strlen(tmpbuf), sizeof(tmpbuf)-strlen(tmpbuf),
+                " # %s n=%d id=0x%x dev=%d off=0x%lx size=0x%x img_size=0x%x",
+                flash_slot_name_from_image_slot(image_index, slot),
+                flash_upload_id_from_image_slot(image_index, slot),
+                area_id, fap->fa_device_id, fap->fa_off, fap->fa_size, errorInfo ? 0 : hdr.ih_img_size);
+#endif
             zcbor_tstr_encode_ptr(cbor_state, tmpbuf, strlen((char *)tmpbuf));
             zcbor_map_end_encode(cbor_state, 20);
         }
@@ -414,12 +505,13 @@ bs_upload(char *buf, int len)
         goto out_invalid_data;
     }
 
-#if !defined(MCUBOOT_SERIAL_DIRECT_IMAGE_UPLOAD)
-    rc = flash_area_open(flash_area_id_from_multi_image_slot(img_num, 0), &fap);
-#else
-    rc = flash_area_open(flash_area_id_from_direct_image(img_num), &fap);
-#endif
+    rc = flash_area_open(flash_area_id_from_upload_id(img_num), &fap);
     if (rc) {
+        rc = MGMT_ERR_EINVAL;
+        goto out;
+    }
+
+    if (flash_area_is_active_bootloader(fap)) {
         rc = MGMT_ERR_EINVAL;
         goto out;
     }
