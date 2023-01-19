@@ -82,6 +82,21 @@ config PM_PARTITION_SIZE_MCUBOOT_SECONDARY
 	help
 	  The secondary mcuboot partition is used for net-core image
 
+config BNO_IMAGE_STATE_TRAILER
+	bool "Add support for the B&O image state trailer"
+	default n
+	depends on MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+	help
+	  Adds support for the custom B&O image state
+	  trailer, which will then be placed as the
+	  the last part of the last flash sector in the
+	  flash area of the corresponding image.
+	  This state trailer is supported in the custom
+	  B&O NRF immutable bootloader.
+	  Current implementation is dependent on the
+	  MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+	  option.
+
 config MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
 	bool "mcumgr:image_upload assumes n=1+image*2+slot"
 	default n
