@@ -67,6 +67,21 @@ config SINGLE_APPLICATION_SLOT
 	  uploading a new application overwrites the one that previously
 	  occupied the area.
 
+config PM_PARTITION_SIZE_MCUBOOT_INEQUAL_PRIMARY_SECONDARY
+	bool "Accept inequally sized primary and secondary partitions"
+	default n
+	help
+	  The primary partition is used for app-core
+	  image and the secondary partition is used
+	  for net-core image.
+
+config PM_PARTITION_SIZE_MCUBOOT_SECONDARY
+	hex "Size of the secondary mcuboot partition"
+	default 0x40000
+	depends on PM_PARTITION_SIZE_MCUBOOT_INEQUAL_PRIMARY_SECONDARY
+	help
+	  The secondary mcuboot partition is used for net-core image
+
 config MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
 	bool "mcumgr:image_upload assumes n=1+image*2+slot"
 	default n
