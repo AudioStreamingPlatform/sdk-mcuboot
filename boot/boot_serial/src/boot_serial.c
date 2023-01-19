@@ -114,6 +114,74 @@ BOOT_LOG_MODULE_DECLARE(mcuboot);
 #define IMAGES_ITER(x)
 #endif
 
+#ifdef CONFIG_BNO_IMAGE_STATE_TRAILER
+/* Assert dependency on CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX */
+#ifndef CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+#error "CONFIG_BNO_IMAGE_STATE_TRAILER requires CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX to be set"
+#endif
+/* upgradable mcuboot bootloader option for usage with the B&O custom version of
+ * NRF secure immutable bootloader (b0).
+ * Adds an image state trailer at the end of of flash partitions slot0 and slot1
+ *
+ * The upgrade flow is then supposed to follow:
+ *
+ * 1) mcuboot erase flash sector for mcuboot_image_trailer
+ *
+ * 2) mcuboot writes new image to flash (e.g. "mcumgr image upload")
+ *
+ * 3) mcuboot writes mcuboot_image_trailer with value mcuboot_image_trailer_init
+ *    as final step of image upload
+ *
+ * 4) device is rebooted via "mcumgr reboot" or external reset
+ *
+ * 5) b0 checks if one or both mcuboot slots have a trailer.magic. If not,
+ *    normal boot proceeds
+ *
+ * 6) b0 updates mcuboot_image_trailer.status appropriately:
+ *      From TESTING to BOOTING (if any TESTING)
+ *      From BOOTING to INACTIVE (if any BOOTING)
+ *
+ * 7) b0 gives a slot 1st priority if its trailer.status=TESTING otherwise it
+ *    prioritizes trailer.status=ACTIVE
+ *
+ * 8) mcuboot changes trailer.status from BOOTING to ACTIVE if confirmed by
+ *    "mcumgr image confirm" mcuboot also marks passive slot INACTIVE, to avoid
+ *    booting in that (except fallback)
+ *    NOTE: if any image fails to validate, the other bank will still be
+ *          attempted as well. Hence b0 can "fallback" to an image otherwise
+ *          marked as INACTIVE.
+ * */
+
+/* Note1: interface cloned by `sdk-nrf` in
+ *        subsys/bootloader/bl_storage/bl_storage.c
+ *
+ * Note2: these constants rely on bits in flash can be changed from 1 to 0
+ *        without erasing
+ * */
+#define MCUBOOT_IMAGE_TRAILER_STATUS_UNKNOWN  0xFFFFFFFF
+#define MCUBOOT_IMAGE_TRAILER_STATUS_TESTING  0xFFFFFFFE
+#define MCUBOOT_IMAGE_TRAILER_STATUS_BOOTING  0xFFFFFFFC
+#define MCUBOOT_IMAGE_TRAILER_STATUS_ACTIVE   0xFFFFFFF8
+#define MCUBOOT_IMAGE_TRAILER_STATUS_INACTIVE 0x00000000
+#define MCUBOOT_IMAGE_TRAILER_MAGIC_SZ 3
+
+typedef struct {
+    uint32_t status; /* mcuboot writes TESTING or ACTIVE, b0 writes BOOTING if
+                      * TESTING found
+                      * */
+    uint32_t magic[MCUBOOT_IMAGE_TRAILER_MAGIC_SZ]; /* mcuboot writes this*/
+} mcuboot_image_trailer;
+
+const mcuboot_image_trailer mcuboot_image_trailer_init = {
+	.status = MCUBOOT_IMAGE_TRAILER_STATUS_TESTING,
+	.magic = {
+		0x1234beef,
+		0xbeef1234,
+		0x1234beef
+	}
+};
+#endif
+
 static char in_buf[MCUBOOT_SERIAL_MAX_RECEIVE_SIZE + 1];
 static char dec_buf[MCUBOOT_SERIAL_MAX_RECEIVE_SIZE + 1];
 const struct boot_uart_funcs *boot_uf;
@@ -662,6 +730,33 @@ bs_upload(char *buf, int len)
                 goto out;
             }
 #endif
+#ifdef CONFIG_BNO_IMAGE_STATE_TRAILER
+            /* Final step; write the B&O magic header with image booting status
+             * for b0 immutable bootloader to read.
+             * We're reusing the existing "status_sector" as implemented by
+             * mcuboot, as this is used for the same purpose with a different
+             * setup (hence not conflicting for us).
+             *
+             * We can write without erase here because the bs_upload routine has
+             * taken care of erasing either the entire partition at once or in
+             * steps (see the code just above).
+             * */
+            /* only add the trailer if this is an mcuboot partition */
+            if (img_num == 3 || img_num == 4) {
+                off_t tr_sect_off = flash_sector_get_off(&status_sector);
+                uint32_t tr_sect_sz = flash_sector_get_size(&status_sector);
+
+                uint32_t tr_sz = sizeof(mcuboot_image_trailer);
+                off_t tr_off = tr_sect_off + tr_sect_sz - tr_sz;
+                if (flash_area_write(fap, tr_off,
+                                     (void *)&mcuboot_image_trailer_init,
+                                     tr_sz)) {
+                    rc = MGMT_ERR_EUNKNOWN;
+                    goto out;
+                }
+            }
+#endif
+
             rc = BOOT_HOOK_CALL(boot_serial_uploaded_hook, 0, img_num, fap,
                                 img_size);
             if (rc) {
@@ -776,6 +871,62 @@ bs_reset(char *buf, int len)
 #endif
 }
 
+static void
+bs_confirm_active_mcuboot(void)
+{
+#ifdef CONFIG_BNO_IMAGE_STATE_TRAILER
+    const struct flash_area *fap;
+
+    /* iterate both mcuboot images (id 3 + 4) */
+    for (uint32_t img = 3; img <= 4; ++img) {
+        if (flash_area_open(flash_area_id_from_upload_id(img), &fap)) {
+            goto conf_err;
+        }
+
+        mcuboot_image_trailer image_trailer = mcuboot_image_trailer_init;
+        if (flash_area_is_active_bootloader(fap)) {
+            /* Confirm active bank*/
+            image_trailer.status = MCUBOOT_IMAGE_TRAILER_STATUS_ACTIVE;
+        } else {
+            /* Mark other bank inactive */
+            image_trailer.status = MCUBOOT_IMAGE_TRAILER_STATUS_INACTIVE;
+        }
+
+        /* obtain offsets for the flash page that holds the trailer */
+        struct flash_sector tr_sect;
+        if (flash_area_sector_from_off(boot_status_off(fap), &tr_sect)) {
+            goto conf_err;
+        }
+        off_t tr_sect_off = flash_sector_get_off(&tr_sect);
+        uint32_t tr_sect_sz = flash_sector_get_size(&tr_sect);
+
+        /* Erase the flash page first to be able to write to it */
+        if (flash_area_erase(fap, tr_sect_off, tr_sect_sz)) {
+            goto conf_err;
+        }
+
+        /* Calculate trailer offset + size */
+        uint32_t tr_sz = sizeof(mcuboot_image_trailer);
+        off_t tr_off = tr_sect_off + tr_sect_sz - tr_sz;
+        /* Write the new image trailer to the flash */
+        if (flash_area_write(fap, tr_off, (void *)&image_trailer, tr_sz)) {
+            goto conf_err;
+        }
+
+        /* Close the flash area for good measure */
+        flash_area_close(fap);
+    }
+    bs_rc_rsp(MGMT_ERR_OK);
+    return;
+
+conf_err:
+    flash_area_close(fap);
+    bs_rc_rsp(MGMT_ERR_EUNKNOWN);
+#else
+    bs_rc_rsp(MGMT_ERR_ENOTSUP);
+#endif
+}
+
 /*
  * Parse incoming line of input from console.
  * Expect newtmgr protocol with serial transport.
@@ -805,7 +956,13 @@ boot_serial_input(char *buf, int len)
     if (hdr->nh_group == MGMT_GROUP_ID_IMAGE) {
         switch (hdr->nh_id) {
         case IMGMGR_NMGR_ID_STATE:
-            bs_list(buf, len);
+            if (hdr->nh_op == NMGR_OP_READ) {
+                /* State read is the "image list" command */
+                bs_list(buf, len);
+            } else {
+                /* State write is the "image confirm" command */
+                bs_confirm_active_mcuboot();
+            }
             break;
         case IMGMGR_NMGR_ID_UPLOAD:
             bs_upload(buf, len);
