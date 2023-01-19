@@ -17,7 +17,11 @@ mcuboot_primary:
 # slot configuration.
 #if !defined(CONFIG_SINGLE_APPLICATION_SLOT) && !defined(CONFIG_BOOT_DIRECT_XIP)
 mcuboot_secondary:
+#if defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_INEQUAL_PRIMARY_SECONDARY) && defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_SECONDARY)
+  size: CONFIG_PM_PARTITION_SIZE_MCUBOOT_SECONDARY
+#else
   share_size: [mcuboot_primary]
+#endif /* defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_INEQUAL_PRIMARY_SECONDARY) && defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_SECONDARY) */
 #if defined(CONFIG_PM_EXTERNAL_FLASH_MCUBOOT_SECONDARY)
   region: external_flash
   placement:
@@ -44,7 +48,11 @@ mcuboot_secondary_pad:
     align: {start: CONFIG_FPROTECT_BLOCK_SIZE}
 
 mcuboot_secondary_app:
+#if defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_INEQUAL_PRIMARY_SECONDARY) && defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_SECONDARY)
+  size: CONFIG_PM_PARTITION_SIZE_MCUBOOT_SECONDARY
+#else
   share_size: mcuboot_primary_app
+#endif /* defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_INEQUAL_PRIMARY_SECONDARY) && defined(CONFIG_PM_PARTITION_SIZE_MCUBOOT_SECONDARY) */
   placement:
     after: mcuboot_secondary_pad
 
