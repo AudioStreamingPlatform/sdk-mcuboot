@@ -819,7 +819,29 @@ boot_validate_slot(struct boot_loader_state *state, int slot,
          * Its flash_area hasn't got relevant boundaries.
          * Therfore need to override its boundaries for the check.
          */
+#ifdef CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX
+        /* The SIMPLE_IMAGE_INDEX was made for the use case, where there isn't
+         * really a "secondary" slot as far as MCUboot terminology. Instead, we
+         * are writing directly to different partitions depending on whether we
+         * are flashing the app-core-image or the net-core-image.
+         * In this case, the MCUBOOT_SECONDARY partition is _always_ intended
+         * for the net-core-image. Hence we should adjust boundaries based on
+         * this.
+         *
+         * Since no real "secondary" slot exists, the img_idx as returned by
+         * BOOT_CURR_IMG(state) will always be 0 (there is only a "primary" slot
+         * for all images).
+         *
+         * Note: this check is only added to sooth the nerves on people reading
+         *       this patch. The careful reader has noticed that this check has
+         *       already been made in the conditional that brings us to these
+         *       lines ;)
+         * */
+        if (fap->fa_id == PM_MCUBOOT_SECONDARY_ID) {
+#else
         if (BOOT_CURR_IMG(state) == 1) {
+#endif
+            BOOT_LOG_INF("NetCore update detected. Adjusting boundaries");
             min_addr = PM_CPUNET_APP_ADDRESS;
             max_addr = PM_CPUNET_APP_ADDRESS + PM_CPUNET_APP_SIZE;
         } else
