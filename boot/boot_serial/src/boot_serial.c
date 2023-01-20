@@ -757,8 +757,30 @@ bs_upload(char *buf, int len)
             }
 #endif
 #if defined(CONFIG_SOC_NRF5340_CPUAPP) && defined(PM_CPUNET_B0N_ADDRESS)
+            /* Logic for signalling a net-core-image update on next boot.
+             * Writes an image trailer to the last part of the image partition
+             * with a swap_type flag that MCUboot reads during boot. MCUboot
+             * will then copy the image to the net-core flash based off the
+             * value of the swap_type flag
+             * */
+#if defined(CONFIG_BNO_IMAGE_STATE_TRAILER) \
+&&  defined(CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX)
+            /* Since this is only used for updating the net-core-image, it
+             * should only be done for the net-core-image partition.
+             * This also avoids clashing between the B&O trailer (for MCUboot
+             * partitions [s0, s1]).
+             * */
+            if (rc == 0 && img_num == 2) {
+#else
             if (rc == 0) {
-                rc = boot_set_pending_multi(img_num, 1);
+#endif /* defined(CONFIG_BNO_IMAGE_STATE_TRAILER)
+       && defined(CONFIG_MCUBOOT_SERIAL_MCUMGR_SIMPLE_IMAGE_INDEX) */
+
+                /* The first argument is passed directly to macros expecting
+                 * input of either 0 or 1. The modulo brings img_num into the
+                 * valid range while leaving already valid input unaffected.
+                 * */
+                rc = boot_set_pending_multi((img_num % 2), 1);
                 if (rc) {
                     BOOT_LOG_ERR("Error %d while setting image to pending", rc);
                 }
