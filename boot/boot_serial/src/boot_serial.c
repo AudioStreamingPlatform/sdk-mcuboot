@@ -319,33 +319,7 @@ static int flash_area_id_from_upload_id(uint32_t upload_id)
     if (upload_id >= 1) {
         uint32_t image_index = (upload_id - 1) / 2;
         uint32_t slot = (upload_id - 1) % 2;
-        /* This switch is essentially a manual inlining of the
-         * `flash_area_id_from_multi_image_slot` function.
-         * The return value has been tweaked to fit the SIMPLE_IMAGE_INDEX
-         * scheme though.
-         * This solution may be preferred over tweaking the FLASH_AREA_IMAGE_x
-         * macros as they are used in other places as well.
-         * */
-        switch(slot) {
-        case 0:
-            switch(image_index) {
-            case 0: return PM_MCUBOOT_PRIMARY_ID;
-            case 1: return PM_S0_ID;
-            default: return 255;
-            }
-        case 1:
-            switch(image_index) {
-            case 0: return PM_MCUBOOT_SECONDARY_ID;
-            case 1: return PM_S1_ID;
-            default: return 255;
-            }
-    /* Case unreachable. Included for completeness
-     *  case 2:
-     *  return FLASH_AREA_IMAGE_SCRATCH;
-     * */
-        default:
-            return -1;
-        }
+        return flash_area_id_from_multi_image_slot(image_index, slot);
     }
     return -1;
 #elif defined(MCUBOOT_SERIAL_DIRECT_IMAGE_UPLOAD)
