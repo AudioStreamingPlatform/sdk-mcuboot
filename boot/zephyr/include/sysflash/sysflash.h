@@ -36,7 +36,7 @@ extern uint32_t _image_1_primary_slot_id[];
         ((x == 0) ?                            \
            PM_MCUBOOT_PRIMARY_ID :             \
          (x == 1) ?                            \
-          PM_MCUBOOT_PRIMARY_ID : \
+          PM_S0_ID : \
            255 )
 #endif
 
@@ -44,7 +44,7 @@ extern uint32_t _image_1_primary_slot_id[];
         ((x == 0) ?                   \
             PM_MCUBOOT_SECONDARY_ID:  \
         (x == 1) ?                    \
-           PM_MCUBOOT_SECONDARY_ID :  \
+           PM_S1_ID :  \
            255 )
 #else
 
